@@ -57,10 +57,21 @@ serve(async (req) => {
     let userId = Deno.env.get('SYNC_USER_ID')
     if (!userId) {
       const { data: { users }, error: usersError } = await supabaseAdmin.auth.admin.listUsers()
-      if (usersError || !users || users.length === 0) {
-        throw new Error('No users found in the system. Create a user first.')
+      if (usersError) {
+        throw new Error('Error fetching users: ' + usersError.message)
       }
-      userId = users[0].id
+      if (!users || users.length === 0) {
+        // Auto-create a default user for the personal workspace
+        const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+          email: 'admin@dsa-workspace.local',
+          password: 'dsa-workspace-password',
+          email_confirm: true
+        })
+        if (createError) throw new Error('Error creating default user: ' + createError.message)
+        userId = newUser.user.id
+      } else {
+        userId = users[0].id
+      }
     }
 
     // Find or create problem
