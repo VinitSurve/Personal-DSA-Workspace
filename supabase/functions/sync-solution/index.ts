@@ -52,26 +52,10 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Get the primary user (since it's a personal app, fetch the first user)
-    // Or if SYNC_USER_ID is set, use it.
-    let userId = Deno.env.get('SYNC_USER_ID')
+    // Use the explicitly configured SYNC_USER_ID from Edge Function secrets
+    const userId = Deno.env.get('SYNC_USER_ID')
     if (!userId) {
-      const { data: { users }, error: usersError } = await supabaseAdmin.auth.admin.listUsers()
-      if (usersError) {
-        throw new Error('Error fetching users: ' + usersError.message)
-      }
-      if (!users || users.length === 0) {
-        // Auto-create a default user for the personal workspace
-        const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-          email: 'admin@dsa-workspace.local',
-          password: 'dsa-workspace-password',
-          email_confirm: true
-        })
-        if (createError) throw new Error('Error creating default user: ' + createError.message)
-        userId = newUser.user.id
-      } else {
-        userId = users[0].id
-      }
+      throw new Error('SYNC_USER_ID is not configured. Please set it in your Supabase Edge Function secrets.')
     }
 
     // Find or create problem
