@@ -1,0 +1,78 @@
+name: Sync Solutions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'solutions/**/*.py'
+      - 'solutions/**/*.js'
+      - 'solutions/**/*.ts'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: solutions/**/*
+
+      - name: Sync each changed file
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SYNC_SECRET_TOKEN: ${{ secrets.SYNC_SECRET_TOKEN }}
+        run: |
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            echo "Syncing $file"
+            
+            # Determine language based on extension
+            EXT="${file##*.}"
+            if [ "$EXT" = "py" ]; then
+              LANGUAGE="python"
+            elif [ "$EXT" = "js" ]; then
+              LANGUAGE="javascript"
+            elif [ "$EXT" = "ts" ]; then
+              LANGUAGE="typescript"
+            else
+              LANGUAGE="text"
+            fi
+            
+            # Read code
+            if [ ! -f "$file" ]; then
+              echo "$file was deleted. Skipping sync for now (deletion logic handled separately)."
+              continue
+            fi
+            
+            CODE=$(cat "$file")
+            
+            # Escape code for JSON payload using jq
+            JSON_PAYLOAD=$(jq -n \
+              --arg path "$file" \
+              --arg code "$CODE" \
+              --arg commit_sha "${{ github.sha }}" \
+              --arg commit_message "${{ github.event.head_commit.message }}" \
+              --arg language "$LANGUAGE" \
+              '{path: $path, code: $code, commit_sha: $commit_sha, commit_message: $commit_message, language: $language}')
+            
+            # POST to Supabase Edge Function
+            STATUS_CODE=$(curl -s -o response.json -w "%{http_code}" -X POST "$SUPABASE_URL/functions/v1/sync-solution" \
+              -H "Authorization: Bearer $SYNC_SECRET_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$JSON_PAYLOAD")
+            
+            if [ "$STATUS_CODE" -eq 200 ]; then
+              echo "Sync successful for $file"
+            else
+              echo "Sync failed for $file with status $STATUS_CODE"
+              cat response.json
+              exit 1
+            fi
+          done
